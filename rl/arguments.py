@@ -25,7 +25,11 @@ def parse_args():
 
     # Run MAML instead of CAVIA
     parser.add_argument('--maml', action='store_true', default=False,
-                        help='turn on MAML')
+                        help='turn on MAML')    
+    parser.add_argument('--custom', action='store_true', default=False,
+                        help='turn on CustomCAVIA')
+    parser.add_argument('--debug', action='store_true', default=False,
+                        help='turn on debugging mode')
     # Policy network (relu activation function)
     parser.add_argument('--hidden-size', type=int, default=100,
                         help='number of hidden units per layer')
@@ -37,6 +41,8 @@ def parse_args():
                         help='How often to test multiple updates')
     parser.add_argument('--num-test-steps', type=int, default=5,
                         help='Number of inner loops in the test set')
+    parser.add_argument('--num-train-steps', type=int, default=1,
+                        help='Number of inner loops in the train set (in the adapt function)')
     parser.add_argument('--test-batch-size', type=int, default=40,
                         help='batch size (number of trajectories) for testing')
     parser.add_argument('--halve-test-lr', action='store_true', default=False,
@@ -80,7 +86,15 @@ def parse_args():
     # use the GPU if available
     args.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-    args.output_folder = 'maml' if args.maml else 'cavia'
+    if args.custom:
+	    args.output_folder = 'custom_cavia'
+    elif not args.maml:	
+        args.output_folder = 'cavia'
+    else:
+        args.output_folder = 'maml'
+    #args.output_folder = 'maml' if args.maml else 'cavia'
+    if args.debug:
+        args.output_folder += '_debug'
 
     if args.maml and not args.halve_test_lr:
         warnings.warn('You are using MAML and not halving the LR at test time!')

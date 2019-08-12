@@ -62,7 +62,7 @@ def run(args, log_interval=5000, rerun=False):
                                 args.lr_meta)
 
     # initialise loggers
-    logger = Logger()
+    logger = Logger("maml")
     logger.best_valid_model = copy.deepcopy(model_outer)
 
     for i_iter in range(args.n_iter):

@@ -18,9 +18,12 @@ def set_seed(seed, cudnn=True):
     torch.manual_seed(seed)
     torch.random.manual_seed(seed)
     torch.cuda.manual_seed(seed)
+    state = torch.get_rng_state()
+    torch.set_rng_state(state)
     # note: the below slows down the code but makes it reproducible
     if (seed is not None) and cudnn:
         torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
 
 
 def save_obj(obj, name):

@@ -1,0 +1,11 @@
+2019-07-20 03:26:40,432 INFO - log_helper - Finished configuring logger
+2019-07-20 03:26:40,436 CRITICAL - log_helper - Unhandled exception
+Traceback (most recent call last):
+  File "main.py", line 4, in <module>
+    import custom_cavia
+  File "/home/tj/cavia_context/regression/custom_cavia.py", line 18, in <module>
+    from custom_cavia_model import CustomCaviaModel
+  File "/home/tj/cavia_context/regression/custom_cavia_model.py", line 59
+    x = torch.cat((grad_context_params, self.context_params, dim=0))
+                                                                ^
+SyntaxError: invalid syntax

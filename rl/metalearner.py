@@ -6,6 +6,8 @@ from torch.nn.utils.convert_parameters import (vector_to_parameters,
 from rl_utils.optimization import conjugate_gradient
 from rl_utils.torch_utils import (weighted_mean, detach_distribution, weighted_normalize)
 
+import numpy as np
+import os
 
 class MetaLearner(object):
     """Meta-learner
@@ -28,7 +30,7 @@ class MetaLearner(object):
     """
 
     def __init__(self, sampler, policy, baseline, gamma=0.95,
-                 fast_lr=0.5, tau=1.0, device='cpu'):
+                 fast_lr=0.5, tau=1.0, device='cpu', args=None):
         self.sampler = sampler
         self.policy = policy
         self.baseline = baseline
@@ -36,6 +38,7 @@ class MetaLearner(object):
         self.fast_lr = fast_lr
         self.tau = tau
         self.to(device)
+        self.args = args
 
     def inner_loss(self, episodes, params=None):
         """Compute the inner loss for the one-step gradient update. The inner 
@@ -55,7 +58,7 @@ class MetaLearner(object):
 
         return loss
 
-    def adapt(self, episodes, first_order=False, params=None, lr=None):
+    def adapt(self, episodes, first_order=False, params=None, lr=None, halve_lr=None):
         """Adapt the parameters of the policy network to a new task, from 
         sampled trajectories `episodes`, with a one-step gradient update [1].
         """
@@ -63,19 +66,23 @@ class MetaLearner(object):
         if lr is None:
             lr = self.fast_lr
 
+        # for i in range(1, self.args.num_train_steps + 1):
+
         # Fit the baseline to the training episodes
         self.baseline.fit(episodes)
 
         # Get the loss on the training episodes
         loss = self.inner_loss(episodes, params=params)
+        # print(loss)
 
         # Get the new parameters after a one-step gradient update
         params = self.policy.update_params(loss, step_size=lr, first_order=first_order, params=params)
 
         return params, loss
 
+# --- USER CUSTOM ---
     def sample(self, tasks, first_order=False):
-        """Sample trajectories (before and after the update of the parameters) 
+        """Sample trajectories (before and after the update of the parameters)
         for all the tasks `tasks`.
         """
         episodes = []
@@ -85,7 +92,9 @@ class MetaLearner(object):
             self.policy.reset_context()
             train_episodes = self.sampler.sample(self.policy, gamma=self.gamma)
             # inner loop (for CAVIA, this only updates the context parameters)
-            params, loss = self.adapt(train_episodes, first_order=first_order)
+            params=None
+            for i in range(self.args.num_train_steps):
+                params, loss = self.adapt(train_episodes, first_order=first_order, params=params)
             # rollouts after inner loop update
             valid_episodes = self.sampler.sample(self.policy, params=params, gamma=self.gamma)
             episodes.append((train_episodes, valid_episodes))
@@ -93,7 +102,8 @@ class MetaLearner(object):
 
         return episodes, losses
 
-    def test(self, tasks, num_steps, batch_size, halve_lr):
+# --- USER CUSTOM ---
+    def test(self, tasks, num_test_steps, batch_size, halve_lr, output_dir):
         """Sample trajectories (before and after the update of the parameters)
         for all the tasks `tasks`.batchsize
         """
@@ -113,20 +123,30 @@ class MetaLearner(object):
             # initialise list which will log all rollouts for the current task
             curr_episodes = [test_episodes]
 
-            for i in range(1, num_steps + 1):
-
-                # lower learning rate after first update (for MAML, as described in their paper)
+            for i in range(1, num_test_steps + 1):
                 if i == 1 and halve_lr:
                     lr = self.fast_lr / 2
                 else:
                     lr = self.fast_lr
 
                 # inner-loop update
-                params, loss = self.adapt(test_episodes, first_order=True, params=params, lr=lr)
+                
+                params, loss = self.adapt(test_episodes, first_order=True, params=params, lr=self.fast_lr)
 
                 # get new rollouts
                 test_episodes = self.sampler.sample(self.policy, gamma=self.gamma, params=params, batch_size=batch_size)
                 curr_episodes.append(test_episodes)
+                # print("[Test] len of curr_episodes: {}".format(len(curr_episodes)))
+
+            # if(self.args.custom):   
+            temp = {"M_saved": self.policy.M_saved, "grad_saved": self.policy.grad_saved,
+                    "F_saved": self.policy.F_saved, "norm_ggT": self.policy.norm_ggT,\
+                    "L_saved": self.policy.L_saved, "R_saved": self.policy.R_saved,
+                    "norm_masked_ggT": self.policy.norm_masked_ggT, "norm_fim_inverse": self.policy.norm_fim_inverse,\
+                    "norm_norm_fim_inverse": self.policy.norm_norm_fim_inverse}
+            print("saving to .npy file")
+            np.save(output_dir + "-Task-" + str(i) + ".npy", temp)
+
 
             episodes_per_task.append(curr_episodes)
 
@@ -142,7 +162,11 @@ class MetaLearner(object):
 
             # this is the inner-loop update
             self.policy.reset_context()
-            params, _ = self.adapt(train_episodes)
+            
+            params=None
+            for i in range(self.args.num_train_steps):
+                params, _ = self.adapt(train_episodes, params=params)
+
             pi = self.policy(valid_episodes.observations, params=params)
 
             if old_pi is None:
@@ -181,7 +205,9 @@ class MetaLearner(object):
 
             # do inner-loop update
             self.policy.reset_context()
-            params, _ = self.adapt(train_episodes)
+            params=None
+            for i in range(self.args.num_train_steps):
+                params, _ = self.adapt(train_episodes, params=params)
 
             with torch.set_grad_enabled(old_pi is None):
 
@@ -221,6 +247,12 @@ class MetaLearner(object):
         old_loss, _, old_pis = self.surrogate_loss(episodes)
         # this part will take higher order gradients through the inner loop:
         grads = torch.autograd.grad(old_loss, self.policy.parameters())
+        # for i, (name, param) in enumerate(self.policy.named_parameters()):
+        #     if("M_layer" in name):
+        #         print(name)
+        #         print(grads[i])
+        #         # print(param)
+        # exit()
         grads = parameters_to_vector(grads)
 
         # Compute the step direction with Conjugate Gradient

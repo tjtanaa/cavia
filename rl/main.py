@@ -14,9 +14,16 @@ from arguments import parse_args
 from baseline import LinearFeatureBaseline
 from metalearner import MetaLearner
 from policies.categorical_mlp import CategoricalMLPPolicy
-from policies.normal_mlp import NormalMLPPolicy, CaviaMLPPolicy
+from policies.normal_mlp import NormalMLPPolicy, CaviaMLPPolicy, CustomCaviaMLPPolicy
 from sampler import BatchSampler
 
+import os
+import sys
+import logging
+import pathlib
+# import datetime
+from pytz import timezone, utc
+from rl_utils import LogHelper
 
 def get_returns(episodes_per_task):
 
@@ -62,17 +69,42 @@ def main(args):
                                             '2DNavigation-v0'])
 
     # subfolders for logging
-    method_used = 'maml' if args.maml else 'cavia'
+    # method_used = 'maml' if args.maml else 'cavia'
+    # method_used = 'custom_cavia' if args.custom else 'cavia'
+    method_used = None
+    if args.custom:
+        method_used = 'custom_cavia'
+    elif not args.maml:
+        method_used = 'cavia'
+    else:
+        method_used = 'maml'
+
+    # -- initialize log_helper
+    output_dir = './artifacts/train/{}-{}'.format(method_used, datetime.datetime.now(timezone('Asia/Hong_Kong')).strftime('%Y-%m-%d_%H-%M-%S-%f')[:-3])
+    if not os.path.exists(output_dir):
+        pathlib.Path(output_dir).mkdir(parents=True, exist_ok=True)
+    LogHelper.setup(log_path='{}/training.log'.format(output_dir),
+                    log_level=logging.INFO)
+    _logger = logging.getLogger(__name__)
+
+    numpy_folder = os.path.join(output_dir, "numpy")
+    if not os.path.exists(numpy_folder):
+        os.makedirs(numpy_folder)
+
     num_context_params = str(args.num_context_params) + '_' if not args.maml else ''
     output_name = num_context_params + 'lr=' + str(args.fast_lr) + 'tau=' + str(args.tau)
     output_name += '_' + datetime.datetime.now().strftime('%d_%m_%Y_%H_%M_%S')
-    dir_path = os.path.dirname(os.path.realpath(__file__))
-    log_folder = os.path.join(os.path.join(dir_path, 'logs'), args.env_name, method_used, output_name)
-    save_folder = os.path.join(os.path.join(dir_path, 'saves'), output_name)
+    # dir_path = os.path.dirname(os.path.realpath(__file__))
+    # log_folder = os.path.join(os.path.join(dir_path, 'logs'), args.env_name, method_used, output_name)
+    # save_folder = os.path.join(os.path.join(dir_path, 'saves'), output_name)
+    log_folder = os.path.join(os.path.join(output_dir, 'logs'), args.env_name, method_used, output_name)
+    save_folder = os.path.join(os.path.join(output_dir, 'saves'), output_name)
     if not os.path.exists(save_folder):
         os.makedirs(save_folder)
     if not os.path.exists(log_folder):
         os.makedirs(log_folder)
+
+
 
     # initialise tensorboard writer
     writer = SummaryWriter(log_folder)
@@ -91,7 +123,19 @@ def main(args):
                            device=args.device, seed=args.seed)
 
     if continuous_actions:
-        if not args.maml:
+        if args.custom:
+            _logger.info("Running Custom Cavia")
+                     
+            policy = CustomCaviaMLPPolicy(
+                int(np.prod(sampler.envs.observation_space.shape)),
+                int(np.prod(sampler.envs.action_space.shape)),
+                hidden_sizes=(args.hidden_size,) * args.num_layers,
+                num_context_params=args.num_context_params,
+                device=args.device
+            )
+
+        elif not args.maml:
+            _logger.info("Running Cavia")   
             policy = CaviaMLPPolicy(
                 int(np.prod(sampler.envs.observation_space.shape)),
                 int(np.prod(sampler.envs.action_space.shape)),
@@ -100,6 +144,7 @@ def main(args):
                 device=args.device
             )
         else:
+            _logger.info("Running Maml")
             policy = NormalMLPPolicy(
                 int(np.prod(sampler.envs.observation_space.shape)),
                 int(np.prod(sampler.envs.action_space.shape)),
@@ -113,13 +158,16 @@ def main(args):
                 int(np.prod(sampler.envs.observation_space.shape)),
                 sampler.envs.action_space.n,
                 hidden_sizes=(args.hidden_size,) * args.num_layers)
-
+                
+    _logger.info(args)
+    _logger.info("Corresponding Directory: {}".format(output_dir))
+    
     # initialise baseline
     baseline = LinearFeatureBaseline(int(np.prod(sampler.envs.observation_space.shape)))
 
     # initialise meta-learner
     metalearner = MetaLearner(sampler, policy, baseline, gamma=args.gamma, fast_lr=args.fast_lr, tau=args.tau,
-                              device=args.device)
+                              device=args.device, args=args)
 
     for batch in range(args.num_batches):
 
@@ -136,9 +184,19 @@ def main(args):
                                       ls_backtrack_ratio=args.ls_backtrack_ratio)
 
         # -- logging
-
+        _logger.info('Batch:{0}'.format(batch))
         curr_returns = total_rewards(episodes, interval=True)
-        print('   return after update: ', curr_returns[0][1])
+        # _logger.info('   return after update: ', curr_returns[0][1])
+
+        _logger.info('policy/actions_train:{} policy/actions_test:{}'\
+                        .format(episodes[0][0].actions.mean(), episodes[0][1].actions.mean()))
+
+        _logger.info('Running_Returns/Before_Update:{} running_returns/after_update:{} \
+                        running_cfis/before_update:{} running_cfis/after_update:{}'\
+                        .format(curr_returns[0][0], curr_returns[0][1], \
+                                curr_returns[1][0], curr_returns[1][1]))
+
+        _logger.info('loss/inner_rl:{} loss/outer_rl:{}'.format(np.mean(inner_losses), outer_loss.item() ))
 
         # Tensorboard
         writer.add_scalar('policy/actions_train', episodes[0][0].actions.mean(), batch)
@@ -157,16 +215,27 @@ def main(args):
 
         # evaluate for multiple update steps
         if batch % args.test_freq == 0:
-            test_tasks = sampler.sample_tasks(num_tasks=args.meta_batch_size)
-            test_episodes = metalearner.test(test_tasks, num_steps=args.num_test_steps,
-                                             batch_size=args.test_batch_size, halve_lr=args.halve_test_lr)
-            all_returns = total_rewards(test_episodes, interval=True)
-            for num in range(args.num_test_steps + 1):
-                writer.add_scalar('evaluation_rew/avg_rew ' + str(num), all_returns[0][num], batch)
-                writer.add_scalar('evaluation_cfi/avg_rew ' + str(num), all_returns[1][num], batch)
+            
+            # -- custom
+            # args.num_test_steps = 1
 
-            print('   inner RL loss:', np.mean(inner_losses))
-            print('   outer RL loss:', outer_loss.item())
+            store_M_dir = os.path.join(numpy_folder, "Test-Batch-" + str(batch))
+
+            test_tasks = sampler.sample_tasks(num_tasks=args.meta_batch_size)
+            test_episodes = metalearner.test(test_tasks, num_test_steps=args.num_test_steps,
+                                             batch_size=args.test_batch_size, halve_lr=args.halve_test_lr, output_dir=store_M_dir)
+            all_returns = total_rewards(test_episodes, interval=True)
+
+            _logger.info('Test:{0}-{0}'.format(batch//args.test_freq, batch))
+
+            for num in range(args.num_test_steps + 1):
+                writer.add_scalar('evaluation_rew/avg_rew_' + str(num), all_returns[0][num], batch)
+                writer.add_scalar('evaluation_cfi/avg_rew_' + str(num), all_returns[1][num], batch)
+                _logger.info('evaluation_rew/avg_rew-{}:{}'.format(num, all_returns[0][num]))
+                _logger.info('evaluation_cfi/avg_rew-{}:{}'.format(num, all_returns[1][num]))
+
+            _logger.info('   inner RL loss:{}'.format(np.mean(inner_losses)))
+            _logger.info('   outer RL loss:{}'.format(outer_loss.item()))
 
         # -- save policy network
         with open(os.path.join(save_folder, 'policy-{0}.pt'.format(batch)), 'wb') as f:

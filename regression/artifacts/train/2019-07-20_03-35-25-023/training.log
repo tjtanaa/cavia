@@ -1,0 +1,12 @@
+2019-07-20 03:35:25,025 INFO - log_helper - Finished configuring logger
+2019-07-20 03:35:31,943 CRITICAL - log_helper - Unhandled exception
+Traceback (most recent call last):
+  File "main.py", line 12, in <module>
+    logger = custom_cavia.run(args, log_interval=100, rerun=True)
+  File "/home/tj/cavia_context/regression/custom_cavia.py", line 155, in run
+    num_updates=args.num_inner_updates)
+  File "/home/tj/cavia_context/regression/custom_cavia.py", line 229, in eval_cavia
+    M = model.M_layer(model.context_params)
+  File "/home/tj/anaconda3/envs/pytorch37/lib/python3.7/site-packages/torch/nn/modules/module.py", line 535, in __getattr__
+    type(self).__name__, name))
+AttributeError: 'CustomCaviaModel' object has no attribute 'M_layer'

@@ -1,0 +1,18 @@
+2019-07-20 03:27:01,147 INFO - log_helper - Finished configuring logger
+2019-07-20 03:27:07,559 CRITICAL - log_helper - Unhandled exception
+Traceback (most recent call last):
+  File "main.py", line 12, in <module>
+    logger = custom_cavia.run(args, log_interval=100, rerun=True)
+  File "/home/tj/cavia_context/regression/custom_cavia.py", line 87, in run
+    train_outputs = model(train_inputs)
+  File "/home/tj/anaconda3/envs/pytorch37/lib/python3.7/site-packages/torch/nn/modules/module.py", line 489, in __call__
+    result = self.forward(*input, **kwargs)
+  File "/home/tj/cavia_context/regression/custom_cavia_model.py", line 52, in forward
+    x = F.relu(self.fc_layers[k](x))
+  File "/home/tj/anaconda3/envs/pytorch37/lib/python3.7/site-packages/torch/nn/modules/module.py", line 489, in __call__
+    result = self.forward(*input, **kwargs)
+  File "/home/tj/anaconda3/envs/pytorch37/lib/python3.7/site-packages/torch/nn/modules/linear.py", line 67, in forward
+    return F.linear(input, self.weight, self.bias)
+  File "/home/tj/anaconda3/envs/pytorch37/lib/python3.7/site-packages/torch/nn/functional.py", line 1352, in linear
+    ret = torch.addmm(torch.jit._unwrap_optional(bias), input, weight.t())
+RuntimeError: cublas runtime error : library not initialized at /opt/conda/conda-bld/pytorch_1549635019666/work/aten/src/THC/THCGeneral.cpp:250

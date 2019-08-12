@@ -15,7 +15,7 @@ import utils
 import tasks_sine, tasks_celebA
 from cavia_model import CaviaModel
 from logger import Logger
-
+from custom_cavia_model import CustomCaviaModel
 
 def run(args, log_interval=5000, rerun=False):
     assert not args.maml
@@ -47,7 +47,7 @@ def run(args, log_interval=5000, rerun=False):
         raise NotImplementedError
 
     # initialise network
-    model = CaviaModel(n_in=task_family_train.num_inputs,
+    model = CustomCaviaModel(n_in=task_family_train.num_inputs,
                        n_out=task_family_train.num_outputs,
                        num_context_params=args.num_context_params,
                        n_hidden=args.num_hidden_layers,
@@ -59,7 +59,7 @@ def run(args, log_interval=5000, rerun=False):
     meta_optimiser = optim.Adam(model.parameters(), args.lr_meta)
 
     # initialise loggers
-    logger = Logger("cavia")
+    logger = Logger("custom_cavia")
     logger.best_valid_model = copy.deepcopy(model)
 
     # --- main training loop ---
@@ -98,8 +98,13 @@ def run(args, log_interval=5000, rerun=False):
                 task_gradients = \
                     torch.autograd.grad(task_loss, model.context_params, create_graph=not args.first_order)[0]
 
-                # update context params (this will set up the computation graph correctly)
-                model.context_params = model.context_params - args.lr_inner * task_gradients
+                b = model.context_params.size()
+
+                # M = model.M_layer(model.context_params)
+                M = model.M_forward(task_gradients)
+                M = M.view(*b,*b)
+
+                model.context_params = model.context_params - args.lr_inner * M.mm(task_gradients.unsqueeze(1)).squeeze(1)
 
             # ------------ compute meta-gradient on test loss of current task ------------
 
@@ -121,6 +126,9 @@ def run(args, log_interval=5000, rerun=False):
             for i in range(len(task_grad)):
                 # clip the gradient
                 meta_gradient[i] += task_grad[i].detach().clamp_(-10, 10)
+            
+            # for name, param in model.M_layer.named_parameters():
+            #     print("{} -> {}".format(name, param.grad))
 
         # ------------ meta update ------------
 
@@ -176,7 +184,7 @@ def run(args, log_interval=5000, rerun=False):
     return logger
 
 
-def eval_cavia(args, model, task_family, num_updates, n_tasks=10, return_gradnorm=False):
+def eval_cavia(args, model, task_family, num_updates, n_tasks=100, return_gradnorm=False):
     # get the task family
     input_range = task_family.get_input_range().to(args.device)
 
@@ -212,11 +220,12 @@ def eval_cavia(args, model, task_family, num_updates, n_tasks=10, return_gradnor
             task_gradients = \
                 torch.autograd.grad(task_loss, model.context_params, create_graph=not args.first_order)[0]
 
-            # update context params
-            if args.first_order:
-                model.context_params = model.context_params - args.lr_inner * task_gradients.detach()
-            else:
-                model.context_params = model.context_params - args.lr_inner * task_gradients
+            b = model.context_params.size()
+
+            M = model.M_forward(task_gradients)
+            M = M.view(*b,*b)
+
+            model.context_params = model.context_params - args.lr_inner * M.mm(task_gradients.unsqueeze(1)).squeeze(1)
 
             # keep track of gradient norms
             gradnorms.append(task_gradients[0].norm().item())

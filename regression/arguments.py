@@ -19,7 +19,7 @@ def parse_args():
     parser.add_argument('--lr_inner', type=float, default=1.0, help='inner-loop learning rate (task-specific)')
     parser.add_argument('--lr_meta', type=float, default=0.001, help='outer-loop learning rate')
 
-    parser.add_argument('--num_inner_updates', type=int, default=1, help='number of inner-loop updates (during training)')
+    parser.add_argument('--num_inner_updates', type=int, default=2, help='number of inner-loop updates (during training)')
 
     parser.add_argument('--num_context_params', type=int, default=5, help='number of context parameters (added at first layer)')
     parser.add_argument('--num_hidden_layers', type=int, nargs='+', default=[40, 40])
@@ -27,6 +27,7 @@ def parse_args():
     parser.add_argument('--first_order', action='store_true', default=False, help='run first-order version')
 
     parser.add_argument('--maml', action='store_true', default=False, help='run MAML')
+    parser.add_argument('--custom', action='store_true', default=False, help='run Custom CAVIA')
     parser.add_argument('--seed', type=int, default=42)
 
     # commands specific to the CelebA image completion task
